@@ -118,9 +118,11 @@ function FamilyOnboarding({ lang, session, onReady }) {
     const { data, error } = await supabase.rpc('join_family', {
       family_uuid: inviteCode.trim(), member_display_name: displayName,
     });
+    if (error) { setBusy(false); setError(error.message); return; }
+    const { data: fam } = await supabase
+      .from('families').select('name').eq('id', data).single();
     setBusy(false);
-    if (error) { setError(error.message); return; }
-    onReady({ id: data, name: '', displayName });
+    onReady({ id: data, name: fam?.name ?? '', displayName });
   };
 
   return (
@@ -174,9 +176,13 @@ export function UserBadge({ lang, session, family, signOut }) {
   const [copied, setCopied] = useState(false);
   if (!session || !family) return null;
   const copy = async () => {
-    await navigator.clipboard.writeText(family.id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(family.id);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      prompt(lang === 'zh' ? '請複製邀請碼：' : 'Copy invite code:', family.id);
+    }
   };
   return (
     <div className="flex items-center gap-2 text-xs text-slate-300">

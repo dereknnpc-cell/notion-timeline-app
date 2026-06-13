@@ -1,16 +1,47 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase.js';
 
-// Reads/writes a single JSONB row keyed on family_id. Each "key" maps to a
-// sub-field inside the JSON blob so all hooks share one row + one realtime
-// subscription per family.
-//
-// Falls back to in-memory state when no family is selected.
+// All useFamilyState hooks for the same family share a single pending write
+// buffer and flush timer, so concurrent updates to different keys merge into
+// one upsert instead of racing each other's read-modify-write cycles.
+
+const pending = new Map();   // family_id -> { patch, timer, version }
+const FLUSH_DELAY_MS = 250;
+
+async function flush(familyId) {
+  const entry = pending.get(familyId);
+  if (!entry || !supabase) return;
+  const patch = entry.patch;
+  entry.patch = {};
+  entry.timer = null;
+  if (Object.keys(patch).length === 0) return;
+  const { data } = await supabase
+    .from('family_state')
+    .select('state')
+    .eq('family_id', familyId)
+    .single();
+  const merged = { ...(data?.state ?? {}), ...patch };
+  await supabase
+    .from('family_state')
+    .update({ state: merged, updated_at: new Date().toISOString() })
+    .eq('family_id', familyId);
+}
+
+function schedulePatch(familyId, key, next) {
+  if (!supabase) return;
+  let entry = pending.get(familyId);
+  if (!entry) {
+    entry = { patch: {}, timer: null };
+    pending.set(familyId, entry);
+  }
+  entry.patch[key] = next;
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => { flush(familyId); }, FLUSH_DELAY_MS);
+}
 
 export function useFamilyState(family, key, initial) {
   const [value, setLocalValue] = useState(initial);
-  const versionRef = useRef(0);
-  const writeTimer = useRef(null);
+  const familyId = family?.id ?? null;
 
   // Pull initial value when family changes.
   useEffect(() => {
@@ -22,8 +53,7 @@ export function useFamilyState(family, key, initial) {
         .select('state')
         .eq('family_id', family.id)
         .single();
-      if (cancelled) return;
-      if (error) return;
+      if (cancelled || error) return;
       const next = data?.state?.[key];
       if (next !== undefined) setLocalValue(next);
     })();
@@ -48,23 +78,7 @@ export function useFamilyState(family, key, initial) {
   const setValue = (updater) => {
     setLocalValue(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      if (family && supabase) {
-        const myVersion = ++versionRef.current;
-        if (writeTimer.current) clearTimeout(writeTimer.current);
-        writeTimer.current = setTimeout(async () => {
-          if (myVersion !== versionRef.current) return;
-          const { data } = await supabase
-            .from('family_state')
-            .select('state')
-            .eq('family_id', family.id)
-            .single();
-          const merged = { ...(data?.state ?? {}), [key]: next };
-          await supabase
-            .from('family_state')
-            .update({ state: merged, updated_at: new Date().toISOString() })
-            .eq('family_id', family.id);
-        }, 250);
-      }
+      if (familyId) schedulePatch(familyId, key, next);
       return next;
     });
   };

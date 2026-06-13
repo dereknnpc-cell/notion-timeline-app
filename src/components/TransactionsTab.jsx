@@ -9,8 +9,11 @@ import { toISODate, parseISO } from '../lib/dates.js';
 export function TransactionsTab({ lang, members, cards, transactions, setTransactions, registeredPromos }) {
   const today = new Date();
   const [draft, setDraft] = useState({
-    date: toISODate(today), amount: 0, category: 'default', merchant: '', cardKey: cards[0]?.key ?? '',
+    date: toISODate(today), amount: 0, category: 'default', merchant: '', cardKey: '',
   });
+  // Auto-select the first card whenever the user hasn't picked a (still-valid) one.
+  const validKey = draft.cardKey && cards.some(c => c.key === draft.cardKey);
+  const effectiveCardKey = validKey ? draft.cardKey : (cards[0]?.key ?? '');
 
   const cardOpts = cards.map(c => {
     const tmpl = CARDS.find(x => x.id === c.templateId);
@@ -20,8 +23,8 @@ export function TransactionsTab({ lang, members, cards, transactions, setTransac
   const catOpts = CATEGORIES.map(c => ({ value: c, label: t(CATEGORY_LABEL[c], lang) }));
 
   const add = () => {
-    if (!draft.cardKey || !draft.amount) return;
-    setTransactions([{ id: `tx-${Date.now()}`, ...draft }, ...transactions]);
+    if (!effectiveCardKey || !draft.amount) return;
+    setTransactions([{ id: `tx-${Date.now()}`, ...draft, cardKey: effectiveCardKey }, ...transactions]);
     setDraft({ ...draft, amount: 0, merchant: '' });
   };
   const remove = (id) => setTransactions(transactions.filter(tx => tx.id !== id));
@@ -48,7 +51,7 @@ export function TransactionsTab({ lang, members, cards, transactions, setTransac
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3 items-end">
         <TextField type="date" label={t('date', lang)} value={draft.date}
           onChange={v => setDraft({ ...draft, date: v })} />
-        <SelectField label={t('card', lang)} value={draft.cardKey}
+        <SelectField label={t('card', lang)} value={effectiveCardKey}
           onChange={v => setDraft({ ...draft, cardKey: v })} options={cardOpts} />
         <TextField type="number" label={t('amount', lang)} value={draft.amount}
           onChange={v => setDraft({ ...draft, amount: v })} />

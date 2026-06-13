@@ -30,7 +30,16 @@ export function CardsTab({ lang, members, cards, setCards }) {
     }
     setCards([...cards, { key: `c-${Date.now()}`, ...draft }]);
   };
-  const remove = (key) => setCards(cards.filter(c => c.key !== key));
+  const remove = (key) => {
+    const linked = cards.filter(c => c.isSupplementary && c.primaryCardKey === key);
+    if (linked.length > 0) {
+      const ok = confirm(lang === 'zh'
+        ? `這張正卡有 ${linked.length} 張副卡，將一併刪除。確定？`
+        : `${linked.length} supplementary card(s) are linked to this card and will also be removed. Continue?`);
+      if (!ok) return;
+    }
+    setCards(cards.filter(c => c.key !== key && c.primaryCardKey !== key));
+  };
 
   const today = new Date();
 
